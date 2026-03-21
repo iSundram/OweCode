@@ -55,6 +55,7 @@ func (c *Client) Models(ctx context.Context) ([]ai.Model, error) {
 }
 
 func (c *Client) TokenCount(messages []ai.Message) (int, error) {
+	// Approximate: 1 token ≈ 4 characters. For accurate counts use tiktoken.
 	total := 0
 	for _, m := range messages {
 		total += len(m.TextContent()) / 4
