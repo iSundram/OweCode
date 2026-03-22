@@ -336,7 +336,7 @@ func parseNonStreamResponse(ar *anthropicResponse) ai.CompletionResponse {
 		OutputTokens: ar.Usage.OutputTokens,
 		TotalTokens:  ar.Usage.InputTokens + ar.Usage.OutputTokens,
 	}
-	return ai.NewStaticResponse(text, toolCalls, stop, usage)
+	return ai.NewStaticResponse(text, "", toolCalls, stop, usage)
 }
 
 // SSE event types from Anthropic streaming API.
@@ -523,6 +523,7 @@ func (r *streamingResponse) Stream() <-chan ai.Chunk   { return r.ch }
 func (r *streamingResponse) ToolCalls() []ai.ToolCall  { return *r.toolCalls }
 func (r *streamingResponse) StopReason() ai.StopReason { return *r.stopReason }
 func (r *streamingResponse) Usage() ai.Usage           { return *r.usage }
+func (r *streamingResponse) GetMetadata() map[string]any { return nil }
 
 func modelContextLimit(model string) int {
 	switch model {

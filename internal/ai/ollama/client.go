@@ -170,5 +170,5 @@ func (c *Client) Complete(ctx context.Context, req ai.CompletionRequest) (ai.Com
 		OutputTokens: or.EvalCount,
 		TotalTokens:  or.PromptEvalCount + or.EvalCount,
 	}
-	return ai.NewStaticResponse(or.Message.Content, toolCalls, stop, usage), nil
+	return ai.NewStaticResponse(or.Message.Content, "", toolCalls, stop, usage), nil
 }

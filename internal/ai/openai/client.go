@@ -205,7 +205,7 @@ func (c *Client) syncComplete(ctx context.Context, req gogpt.ChatCompletionReque
 		OutputTokens: resp.Usage.CompletionTokens,
 		TotalTokens:  resp.Usage.TotalTokens,
 	}
-	return ai.NewStaticResponse(text, toolCalls, stop, usage), nil
+	return ai.NewStaticResponse(text, "", toolCalls, stop, usage), nil
 }
 
 func mapStopReason(r string) ai.StopReason {

@@ -36,6 +36,7 @@ func (r *openaiStreamResponse) Usage() ai.Usage {
 	}
 	return *r.usage
 }
+func (r *openaiStreamResponse) GetMetadata() map[string]any { return nil }
 
 type toolCallAcc struct {
 	id   string
