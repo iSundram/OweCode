@@ -7,8 +7,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math/rand"
 	"net/http"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/iSundram/OweCode/internal/ai"
 )
@@ -17,7 +20,40 @@ const (
 	defaultBaseURL = "https://api.anthropic.com/v1"
 	defaultModel   = "claude-opus-4-5"
 	anthropicVer   = "2023-06-01"
+	maxRetries     = 7
+	maxBackoff     = 60 * time.Second
 )
+
+// apiError holds a parsed HTTP error from the Anthropic API.
+type apiError struct {
+	StatusCode int
+	Message    string
+	RetryAfter time.Duration
+}
+
+func (e *apiError) Error() string {
+	return fmt.Sprintf("anthropic: status %d: %s", e.StatusCode, e.Message)
+}
+
+// isRetryable reports whether this error should trigger a retry.
+func isRetryable(err error) bool {
+	ae, ok := err.(*apiError)
+	if !ok {
+		return false
+	}
+	switch ae.StatusCode {
+	case 429, 500, 502, 503, 504:
+		return true
+	default:
+		return false
+	}
+}
+
+// addJitter adds up to 25% random jitter to a duration.
+func addJitter(d time.Duration) time.Duration {
+	jitter := time.Duration(rand.Int63n(int64(d / 4)))
+	return d + jitter
+}
 
 // Client implements ai.Provider for Anthropic Claude.
 type Client struct {
@@ -204,44 +240,74 @@ func (c *Client) Complete(ctx context.Context, req ai.CompletionRequest) (ai.Com
 		return nil, err
 	}
 
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/messages", bytes.NewReader(body))
-	if err != nil {
-		return nil, err
-	}
-	httpReq.Header.Set("x-api-key", c.apiKey)
-	httpReq.Header.Set("anthropic-version", anthropicVer)
-	httpReq.Header.Set("content-type", "application/json")
-	if req.Stream {
-		httpReq.Header.Set("accept", "text/event-stream")
-	}
+	backoff := time.Second
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/messages", bytes.NewReader(body))
+		if err != nil {
+			return nil, err
+		}
+		httpReq.Header.Set("x-api-key", c.apiKey)
+		httpReq.Header.Set("anthropic-version", anthropicVer)
+		httpReq.Header.Set("content-type", "application/json")
+		if req.Stream {
+			httpReq.Header.Set("accept", "text/event-stream")
+		}
 
-	resp, err := c.httpClient.Do(httpReq)
-	if err != nil {
-		return nil, err
-	}
+		resp, err := c.httpClient.Do(httpReq)
+		if err != nil {
+			return nil, err
+		}
 
-	if resp.StatusCode != http.StatusOK {
-		data, _ := io.ReadAll(resp.Body)
-		resp.Body.Close()
-		return nil, fmt.Errorf("anthropic: status %d: %s", resp.StatusCode, data)
-	}
+		if resp.StatusCode != http.StatusOK {
+			data, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
 
-	if req.Stream {
-		return c.parseStream(resp.Body), nil
-	}
+			ae := &apiError{StatusCode: resp.StatusCode, Message: string(data)}
+			// Parse Retry-After header if present
+			if ra := resp.Header.Get("Retry-After"); ra != "" {
+				if secs, err := strconv.Atoi(ra); err == nil {
+					ae.RetryAfter = time.Duration(secs) * time.Second
+				}
+			}
 
-	defer resp.Body.Close()
-	data, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, err
-	}
+			if !isRetryable(ae) || attempt == maxRetries-1 {
+				return nil, ae
+			}
 
-	var ar anthropicResponse
-	if err := json.Unmarshal(data, &ar); err != nil {
-		return nil, err
-	}
+			wait := backoff
+			if ae.RetryAfter > 0 {
+				wait = ae.RetryAfter
+			}
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(addJitter(wait)):
+			}
+			backoff = backoff * 2
+			if backoff > maxBackoff {
+				backoff = maxBackoff
+			}
+			continue
+		}
 
-	return parseNonStreamResponse(&ar), nil
+		if req.Stream {
+			return c.parseStream(resp.Body), nil
+		}
+
+		defer resp.Body.Close()
+		data, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return nil, err
+		}
+
+		var ar anthropicResponse
+		if err := json.Unmarshal(data, &ar); err != nil {
+			return nil, err
+		}
+
+		return parseNonStreamResponse(&ar), nil
+	}
+	return nil, fmt.Errorf("anthropic: max retries (%d) exceeded", maxRetries)
 }
 
 func parseNonStreamResponse(ar *anthropicResponse) ai.CompletionResponse {
