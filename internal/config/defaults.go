@@ -13,7 +13,7 @@ func Default() *Config {
 
 	return &Config{
 		Provider:    "anthropic",
-		Model:       "claude-opus-4-5",
+		Model:       "claude-sonnet-4-6",
 		Mode:        "suggest",
 		Theme:       "catppuccin",
 		Keybindings: "default",

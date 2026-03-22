@@ -18,7 +18,7 @@ import (
 
 const (
 	defaultBaseURL = "https://api.anthropic.com/v1"
-	defaultModel   = "claude-opus-4-5"
+	defaultModel   = "claude-sonnet-4-6"
 	anthropicVer   = "2023-06-01"
 	maxRetries     = 7
 	maxBackoff     = 60 * time.Second
@@ -78,7 +78,7 @@ func New(cfg ai.ProviderConfig) *Client {
 		apiKey:     cfg.APIKey,
 		baseURL:    base,
 		model:      model,
-		limit:      200000,
+		limit:      modelContextLimit(model),
 	}
 }
 
@@ -87,11 +87,9 @@ func (c *Client) ContextLimit() int { return c.limit }
 
 func (c *Client) Models(_ context.Context) ([]ai.Model, error) {
 	return []ai.Model{
-		{ID: "claude-opus-4-5", Name: "Claude Opus 4.5", ContextLimit: 200000, InputPrice: 15.0, OutputPrice: 75.0},
-		{ID: "claude-sonnet-4-5", Name: "Claude Sonnet 4.5", ContextLimit: 200000, InputPrice: 3.0, OutputPrice: 15.0},
-		{ID: "claude-3-5-sonnet-20241022", Name: "Claude 3.5 Sonnet", ContextLimit: 200000, InputPrice: 3.0, OutputPrice: 15.0},
-		{ID: "claude-3-5-haiku-20241022", Name: "Claude 3.5 Haiku", ContextLimit: 200000, InputPrice: 0.8, OutputPrice: 4.0},
-		{ID: "claude-3-opus-20240229", Name: "Claude 3 Opus", ContextLimit: 200000, InputPrice: 15.0, OutputPrice: 75.0},
+		{ID: "claude-opus-4-6", Name: "Claude Opus 4.6", ContextLimit: 1000000},
+		{ID: "claude-sonnet-4-6", Name: "Claude Sonnet 4.6", ContextLimit: 1000000},
+		{ID: "claude-haiku-4-5", Name: "Claude Haiku 4.5", ContextLimit: 200000},
 	}, nil
 }
 
@@ -359,9 +357,9 @@ type streamContentBlockDelta struct {
 }
 
 type streamContentBlockStart struct {
-	Type         string                 `json:"type"`
-	Index        int                    `json:"index"`
-	ContentBlock anthropicContentBlock  `json:"content_block"`
+	Type         string                `json:"type"`
+	Index        int                   `index"`
+	ContentBlock anthropicContentBlock `json:"content_block"`
 }
 
 type streamMessageDelta struct {
@@ -525,3 +523,12 @@ func (r *streamingResponse) Stream() <-chan ai.Chunk   { return r.ch }
 func (r *streamingResponse) ToolCalls() []ai.ToolCall  { return *r.toolCalls }
 func (r *streamingResponse) StopReason() ai.StopReason { return *r.stopReason }
 func (r *streamingResponse) Usage() ai.Usage           { return *r.usage }
+
+func modelContextLimit(model string) int {
+	switch model {
+	case "claude-opus-4-6", "claude-sonnet-4-6":
+		return 1000000
+	default:
+		return 200000
+	}
+}

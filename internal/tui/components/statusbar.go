@@ -35,14 +35,14 @@ func (s *StatusBar) SetStatus(msg string) { s.status = msg }
 // View renders the status bar.
 func (s StatusBar) View() string {
 	left := s.styles.StatusBar.Render(fmt.Sprintf("  %s", s.status))
-	help := "enter send │ ctrl+c quit │ ctrl+d diff │ ctrl+t tree │ ? help"
+	help := "enter send │ ctrl+r review │ ctrl+d diff │ ctrl+l lsp │ ctrl+s sessions │ ctrl+t tree │ ctrl+u clear │ ctrl+q quit"
 	right := s.styles.StatusBarRight.Render(fmt.Sprintf("%s  ", help))
-	
+
 	spacer := s.width - lipgloss.Width(left) - lipgloss.Width(right)
 	if spacer < 0 {
 		spacer = 0
 	}
-	
+
 	// Minimalist footer without heavy background
 	return left + lipgloss.NewStyle().Width(spacer).Render("") + right
 }

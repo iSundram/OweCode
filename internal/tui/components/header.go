@@ -67,7 +67,7 @@ func (h Header) View() string {
 	}
 	modelStr := h.model
 	if modelStr == "" {
-		modelStr = "gpt-4o"
+		modelStr = "gpt-5.4"
 	}
 	modeStr := h.mode
 	if modeStr == "" {
@@ -77,7 +77,7 @@ func (h Header) View() string {
 	brand := h.styles.HeaderBrand.Render(" ◈ OweCode ")
 	modelInfo := h.styles.HeaderCenter.Render(fmt.Sprintf("[ %s/%s ]", providerStr, modelStr))
 	modeInfo := h.styles.Header.Render(fmt.Sprintf("%s %s ", h.modeIcon(), modeStr))
-	
+
 	tokenStyle := lipgloss.NewStyle().Foreground(h.styles.T.Muted)
 	if h.tokens > 100000 {
 		tokenStyle = lipgloss.NewStyle().Foreground(h.styles.T.Red)
@@ -92,7 +92,7 @@ func (h Header) View() string {
 	content := lipgloss.JoinHorizontal(lipgloss.Center, brand, " │ ", modelInfo, " │ ", modeInfo, " │ ", rightInfo)
 
 	pill := h.styles.HeaderPill.Render(content)
-	
+
 	// Ensure pill is not wider than width
 	pillWidth := lipgloss.Width(pill)
 	if pillWidth > h.width {

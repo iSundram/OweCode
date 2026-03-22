@@ -13,7 +13,7 @@ import (
 
 const (
 	defaultBaseURL = "https://generativelanguage.googleapis.com/v1beta"
-	defaultModel   = "gemini-1.5-pro"
+	defaultModel   = "gemini-3-flash-preview"
 )
 
 // Client implements ai.Provider for Google Gemini.
@@ -48,9 +48,12 @@ func (c *Client) ContextLimit() int { return c.limit }
 
 func (c *Client) Models(_ context.Context) ([]ai.Model, error) {
 	return []ai.Model{
-		{ID: "gemini-1.5-pro", Name: "Gemini 1.5 Pro", ContextLimit: 1000000},
-		{ID: "gemini-1.5-flash", Name: "Gemini 1.5 Flash", ContextLimit: 1000000},
-		{ID: "gemini-2.0-flash-exp", Name: "Gemini 2.0 Flash", ContextLimit: 1000000},
+		{ID: "gemini-3.1-pro-preview", Name: "Gemini 3.1 Pro Preview", ContextLimit: 2097152},
+		{ID: "gemini-3-flash-preview", Name: "Gemini 3 Flash Preview", ContextLimit: 1048576},
+		{ID: "gemini-3.1-flash-lite-preview", Name: "Gemini 3.1 Flash-Lite Preview", ContextLimit: 1048576},
+		{ID: "gemini-2.5-pro", Name: "Gemini 2.5 Pro", ContextLimit: 2097152},
+		{ID: "gemini-2.5-flash", Name: "Gemini 2.5 Flash", ContextLimit: 1048576},
+		{ID: "gemini-2.5-flash-lite", Name: "Gemini 2.5 Flash-Lite", ContextLimit: 1048576},
 	}, nil
 }
 
@@ -68,8 +71,8 @@ type geminiPart struct {
 }
 
 type geminiRequest struct {
-	Contents         []geminiContent `json:"contents"`
-	SystemInstruction *geminiContent `json:"systemInstruction,omitempty"`
+	Contents          []geminiContent `json:"contents"`
+	SystemInstruction *geminiContent  `json:"systemInstruction,omitempty"`
 }
 
 type geminiResponse struct {

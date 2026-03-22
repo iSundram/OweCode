@@ -46,7 +46,7 @@ owecode --mode full-auto "add unit tests for all Go files"
 
 ## Key Features
 
-- **🤖 Multi-Provider AI**: OpenAI GPT-4o, Anthropic Claude, Google Gemini, Mistral, Ollama (local), DeepSeek, and more
+- **🤖 Multi-Provider AI**: OpenAI GPT-5.4, Anthropic Claude 4.6, Google Gemini 3.x, xAI Grok 4.20, DeepSeek, GLM, MiniMax, Kimi, Ollama (local), and more
 - **🎨 Rich Terminal UI**: Built with [Bubble Tea](https://github.com/charmbracelet/bubbletea) + [Lip Gloss](https://github.com/charmbracelet/lipgloss) — syntax highlighting, diff views, progress indicators
 - **🔒 Sandboxed Execution**: OS-native sandboxing (macOS Seatbelt, Linux namespaces/Docker), network-off by default in full-auto
 - **📋 Three Approval Modes**: `suggest` (default), `auto-edit`, `full-auto`

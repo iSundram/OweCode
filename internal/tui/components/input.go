@@ -92,6 +92,9 @@ func (i Input) TriggerType() string {
 		if strings.HasPrefix(val, "/model") {
 			return "model"
 		}
+		if strings.HasPrefix(val, "/provider") {
+			return "provider"
+		}
 		return "command"
 	}
 	if strings.Contains(val, "@") {
@@ -118,6 +121,9 @@ func (i Input) TriggerValue() string {
 	case "model":
 		v := strings.TrimPrefix(val, "/model")
 		return strings.TrimSpace(v)
+	case "provider":
+		v := strings.TrimPrefix(val, "/provider")
+		return strings.TrimSpace(v)
 	case "file":
 		idx := strings.LastIndex(val, "@")
 		if idx != -1 {
@@ -136,6 +142,8 @@ func (i *Input) InsertValue(v string) {
 		i.ta.SetValue("/" + v + " ")
 	case "model":
 		i.ta.SetValue("/model " + v + " ")
+	case "provider":
+		i.ta.SetValue("/provider " + v + " ")
 	case "file":
 		idx := strings.LastIndex(val, "@")
 		if idx != -1 {
@@ -172,7 +180,7 @@ func (i Input) Update(msg tea.Msg) (Input, tea.Cmd) {
 	}
 	ta, cmd := i.ta.Update(msg)
 	i.ta = ta
-	
+
 	lineCount := ta.LineCount()
 	if lineCount > ta.MaxHeight {
 		lineCount = ta.MaxHeight
@@ -181,7 +189,7 @@ func (i Input) Update(msg tea.Msg) (Input, tea.Cmd) {
 		lineCount = 1
 	}
 	i.ta.SetHeight(lineCount)
-	
+
 	return i, cmd
 }
 

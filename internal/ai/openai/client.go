@@ -4,13 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	gogpt "github.com/sashabaranov/go-openai"
 
 	"github.com/iSundram/OweCode/internal/ai"
 )
 
-const defaultModel = "gpt-4o"
+const defaultModel = "gpt-5.4"
 
 // Client implements ai.Provider using the OpenAI API.
 type Client struct {
@@ -35,23 +36,100 @@ func New(cfg ai.ProviderConfig) *Client {
 	return &Client{
 		client: gogpt.NewClientWithConfig(c),
 		model:  model,
-		limit:  128000,
+		limit:  modelContextLimit(model),
 	}
 }
 
-func (c *Client) Name() string         { return "openai" }
-func (c *Client) ContextLimit() int    { return c.limit }
+func (c *Client) Name() string      { return "openai" }
+func (c *Client) ContextLimit() int { return c.limit }
 
 func (c *Client) Models(ctx context.Context) ([]ai.Model, error) {
 	resp, err := c.client.ListModels(ctx)
 	if err != nil {
 		return nil, err
 	}
+
+	// Map of well-known models to provide better metadata
+	metadata := map[string]struct {
+		Name  string
+		Limit int
+	}{
+		"gpt-5.4":           {Name: "GPT-5.4", Limit: 1000000},
+		"gpt-5.4-pro":       {Name: "GPT-5.4 Pro", Limit: 1000000},
+		"gpt-5.4-mini":      {Name: "GPT-5.4 Mini", Limit: 400000},
+		"gpt-5.4-nano":      {Name: "GPT-5.4 Nano", Limit: 400000},
+		"gpt-5":             {Name: "GPT-5", Limit: 128000},
+		"gpt-5-mini":        {Name: "GPT-5 Mini", Limit: 128000},
+		"gpt-5-nano":        {Name: "GPT-5 Nano", Limit: 128000},
+		"gpt-4.1":           {Name: "GPT-4.1", Limit: 128000},
+		"gpt-4o":            {Name: "GPT-4o", Limit: 128000},
+		"gpt-4o-mini":       {Name: "GPT-4o Mini", Limit: 128000},
+		"o1":                {Name: "o1", Limit: 200000},
+		"o1-mini":           {Name: "o1-mini", Limit: 128000},
+		"o1-preview":        {Name: "o1-preview", Limit: 128000},
+		"o3-mini":           {Name: "o3-mini", Limit: 200000},
+		"gpt-4-turbo":       {Name: "GPT-4 Turbo", Limit: 128000},
+		"gpt-3.5-turbo":     {Name: "GPT-3.5 Turbo", Limit: 16385},
+		"deepseek-chat":     {Name: "DeepSeek V3", Limit: 128000},
+		"deepseek-reasoner": {Name: "DeepSeek R1", Limit: 128000},
+	}
+
 	models := make([]ai.Model, 0, len(resp.Models))
 	for _, m := range resp.Models {
-		models = append(models, ai.Model{ID: m.ID, Name: m.ID})
+		// Filter for common chat models to reduce noise
+		id := m.ID
+		if !isChatModel(id) {
+			continue
+		}
+
+		name := id
+		limit := 128000
+		if meta, ok := metadata[id]; ok {
+			name = meta.Name
+			limit = meta.Limit
+		}
+
+		models = append(models, ai.Model{
+			ID:           id,
+			Name:         name,
+			ContextLimit: limit,
+		})
 	}
 	return models, nil
+}
+
+func isChatModel(id string) bool {
+	// Standard OpenAI prefixes
+	prefixes := []string{"gpt-5", "gpt-4", "gpt-3.5", "o1", "o3", "chatgpt", "gpt-realtime"}
+	for _, p := range prefixes {
+		if strings.HasPrefix(id, p) {
+			return true
+		}
+	}
+	// Permissive for OpenRouter/Local providers (usually have / or are common prefixes)
+	if strings.Contains(id, "/") {
+		return true
+	}
+	extraPrefixes := []string{"claude-", "gemini-", "deepseek-", "llama-", "mistral-", "grok-", "glm-", "kimi-", "minimax-"}
+	for _, p := range extraPrefixes {
+		if strings.HasPrefix(id, p) {
+			return true
+		}
+	}
+	return false
+}
+
+func modelContextLimit(model string) int {
+	switch model {
+	case "gpt-5.4", "gpt-5.4-pro":
+		return 1000000
+	case "gpt-5.4-mini", "gpt-5.4-nano":
+		return 400000
+	case "o1", "o3-mini":
+		return 200000
+	default:
+		return 128000
+	}
 }
 
 func (c *Client) TokenCount(messages []ai.Message) (int, error) {
@@ -60,8 +138,19 @@ func (c *Client) TokenCount(messages []ai.Message) (int, error) {
 
 func (c *Client) Complete(ctx context.Context, req ai.CompletionRequest) (ai.CompletionResponse, error) {
 	msgs := convertMessages(req)
+
+	// Handle reasoning models which might not support system messages in the same way
+	// or require specific parameters.
+	isReasoning := strings.HasPrefix(c.model, "o1") || strings.HasPrefix(c.model, "o3")
+
 	if req.System != "" {
-		sys := gogpt.ChatCompletionMessage{Role: "system", Content: req.System}
+		role := "system"
+		if isReasoning {
+			// Some reasoning models prefer system instructions in the first user message
+			// or as a 'developer' role in newer APIs. For now, keep as system but be aware.
+			role = "system"
+		}
+		sys := gogpt.ChatCompletionMessage{Role: role, Content: req.System}
 		msgs = append([]gogpt.ChatCompletionMessage{sys}, msgs...)
 	}
 
@@ -74,6 +163,11 @@ func (c *Client) Complete(ctx context.Context, req ai.CompletionRequest) (ai.Com
 		Temperature: float32(req.Temperature),
 		MaxTokens:   req.MaxTokens,
 		Stream:      req.Stream,
+	}
+
+	// Reasoning models often don't support temperature
+	if isReasoning {
+		gptReq.Temperature = 0
 	}
 
 	if req.Stream {

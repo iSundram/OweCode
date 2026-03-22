@@ -1,33 +1,43 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"io"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
+	"gopkg.in/yaml.v3"
 
 	"github.com/iSundram/OweCode/internal/agent"
 	aiPkg "github.com/iSundram/OweCode/internal/ai"
-	openaiProvider "github.com/iSundram/OweCode/internal/ai/openai"
 	anthropicProvider "github.com/iSundram/OweCode/internal/ai/anthropic"
+	deepseekProvider "github.com/iSundram/OweCode/internal/ai/deepseek"
+	glmProvider "github.com/iSundram/OweCode/internal/ai/glm"
 	googleProvider "github.com/iSundram/OweCode/internal/ai/google"
+	kimiProvider "github.com/iSundram/OweCode/internal/ai/kimi"
+	minimaxProvider "github.com/iSundram/OweCode/internal/ai/minimax"
 	ollamaProvider "github.com/iSundram/OweCode/internal/ai/ollama"
+	openaiProvider "github.com/iSundram/OweCode/internal/ai/openai"
 	openrouterProvider "github.com/iSundram/OweCode/internal/ai/openrouter"
+	xaiProvider "github.com/iSundram/OweCode/internal/ai/xai"
 	"github.com/iSundram/OweCode/internal/config"
+	gitutil "github.com/iSundram/OweCode/internal/git"
 	"github.com/iSundram/OweCode/internal/session"
+	"github.com/iSundram/OweCode/internal/tools"
 	toolsFS "github.com/iSundram/OweCode/internal/tools/filesystem"
 	toolsGit "github.com/iSundram/OweCode/internal/tools/git"
 	toolsInteraction "github.com/iSundram/OweCode/internal/tools/interaction"
+	toolsLSP "github.com/iSundram/OweCode/internal/tools/lsp"
 	toolsShell "github.com/iSundram/OweCode/internal/tools/shell"
 	toolsWeb "github.com/iSundram/OweCode/internal/tools/web"
-	"github.com/iSundram/OweCode/internal/tools"
 	"github.com/iSundram/OweCode/internal/tui"
 	"github.com/iSundram/OweCode/internal/version"
 )
@@ -62,7 +72,7 @@ func init() {
 	f := rootCmd.Flags()
 	f.StringVar(&cfgFile, "config", "", "config file (default ~/.owecode/config.yaml)")
 	f.StringVarP(&flags.Prompt, "prompt", "p", "", "Non-interactive: run this prompt and exit")
-	f.StringVar(&flags.Provider, "provider", "", "AI provider (openai, anthropic, google, ollama, openrouter)")
+	f.StringVar(&flags.Provider, "provider", "", "AI provider (openai, anthropic, google, ollama, openrouter, xai, deepseek, glm, minimax, kimi)")
 	f.StringVarP(&flags.Model, "model", "m", "", "Model name")
 	f.StringVar(&flags.Mode, "mode", "", "Approval mode: suggest, auto-edit, full-auto, plan")
 	f.StringVar(&flags.Theme, "theme", "", "Color theme: catppuccin, dracula")
@@ -95,7 +105,14 @@ func initConfig() {
 	} else {
 		home, _ := os.UserHomeDir()
 		viper.AddConfigPath(home + "/.owecode")
+		viper.AddConfigPath(".owecode")
 		viper.AddConfigPath(".")
+		if wd, err := os.Getwd(); err == nil {
+			if root, err := gitutil.RootDir(context.Background(), wd); err == nil {
+				viper.AddConfigPath(filepath.Join(root, ".owecode"))
+				viper.AddConfigPath(root)
+			}
+		}
 	}
 	viper.SetEnvPrefix("OWECODE")
 	viper.AutomaticEnv()
@@ -104,7 +121,11 @@ func initConfig() {
 
 func run(cmd *cobra.Command, args []string) error {
 	cfg := config.Default()
+	if err := decodeConfigFromViper(cfg); err != nil {
+		return fmt.Errorf("decode config: %w", err)
+	}
 	cfg.ApplyFlags(&flags)
+	applyProjectDefaults(cfg, cmd)
 
 	// Resolve API keys from environment if not set
 	resolveAPIKeysFromEnv(cfg)
@@ -170,7 +191,16 @@ func run(cmd *cobra.Command, args []string) error {
 	reg.Register(&toolsGit.LogTool{})
 	reg.Register(toolsWeb.NewFetchTool())
 	reg.Register(toolsWeb.NewSearchTool())
-	reg.Register(toolsInteraction.NewAskUserTool(nil))
+	reg.Register(&toolsLSP.DiagnosticsTool{})
+	reg.Register(toolsInteraction.NewAskUserTool(func(question string) (string, error) {
+		fmt.Fprintf(os.Stdout, "\n[ask_user] %s\n> ", question)
+		reader := bufio.NewReader(os.Stdin)
+		answer, err := reader.ReadString('\n')
+		if err != nil {
+			return "", err
+		}
+		return strings.TrimSpace(answer), nil
+	}))
 	reg.Register(&toolsInteraction.NotifyTool{})
 
 	// Get AI provider
@@ -191,6 +221,23 @@ func run(cmd *cobra.Command, args []string) error {
 		return runHeadless(cmd.Context(), ag, sess, prompt)
 	}
 	return tui.Run(cfg, ag, sess, prompt)
+}
+
+func applyProjectDefaults(cfg *config.Config, cmd *cobra.Command) {
+	wd, err := os.Getwd()
+	if err != nil {
+		return
+	}
+	root, err := gitutil.RootDir(context.Background(), wd)
+	if err != nil || root == "" {
+		return
+	}
+
+	// Prefer per-project session persistence unless explicitly overridden.
+	if !cmd.Flags().Changed("session-dir") {
+		cfg.SessionDir = filepath.Join(root, ".owecode", "sessions")
+	}
+	_ = os.MkdirAll(filepath.Join(root, ".owecode"), 0o700)
 }
 
 func runHeadless(ctx context.Context, ag *agent.Agent, sess *session.Session, prompt string) error {
@@ -223,6 +270,14 @@ func runHeadless(ctx context.Context, ag *agent.Agent, sess *session.Session, pr
 
 func resolveProvider(cfg *config.Config) (aiPkg.Provider, error) {
 	pc := cfg.Providers[cfg.Provider]
+	if mc, ok := pc.Models[cfg.Model]; ok {
+		if mc.APIKey != "" {
+			pc.APIKey = mc.APIKey
+		}
+		if mc.BaseURL != "" {
+			pc.BaseURL = mc.BaseURL
+		}
+	}
 	aiCfg := aiPkg.ProviderConfig{
 		APIKey:       pc.APIKey,
 		BaseURL:      pc.BaseURL,
@@ -241,6 +296,16 @@ func resolveProvider(cfg *config.Config) (aiPkg.Provider, error) {
 		return ollamaProvider.New(aiCfg), nil
 	case "openrouter":
 		return openrouterProvider.New(aiCfg), nil
+	case "xai":
+		return xaiProvider.New(aiCfg), nil
+	case "deepseek":
+		return deepseekProvider.New(aiCfg), nil
+	case "glm":
+		return glmProvider.New(aiCfg), nil
+	case "minimax":
+		return minimaxProvider.New(aiCfg), nil
+	case "kimi":
+		return kimiProvider.New(aiCfg), nil
 	default:
 		// Check global registry
 		if p, ok := aiPkg.Get(cfg.Provider); ok {
@@ -256,9 +321,13 @@ func resolveAPIKeysFromEnv(cfg *config.Config) {
 		"anthropic":  "ANTHROPIC_API_KEY",
 		"google":     "GEMINI_API_KEY",
 		"openrouter": "OPENROUTER_API_KEY",
+		"xai":        "XAI_API_KEY",
 		"groq":       "GROQ_API_KEY",
 		"mistral":    "MISTRAL_API_KEY",
 		"deepseek":   "DEEPSEEK_API_KEY",
+		"glm":        "GLM_API_KEY",
+		"minimax":    "MINIMAX_API_KEY",
+		"kimi":       "MOONSHOT_API_KEY",
 		"azure":      "AZURE_OPENAI_API_KEY",
 	}
 	if cfg.Providers == nil {
@@ -273,4 +342,29 @@ func resolveAPIKeysFromEnv(cfg *config.Config) {
 			}
 		}
 	}
+}
+
+func decodeConfigFromViper(cfg *config.Config) error {
+	if !viper.IsSet("provider") &&
+		!viper.IsSet("model") &&
+		!viper.IsSet("providers") &&
+		!viper.IsSet("mode") &&
+		!viper.IsSet("sessionDir") {
+		return nil
+	}
+
+	raw := map[string]any{}
+	for _, k := range []string{"provider", "model", "mode", "sessionDir", "providers"} {
+		if viper.IsSet(k) {
+			raw[k] = viper.Get(k)
+		}
+	}
+	data, err := yaml.Marshal(raw)
+	if err != nil {
+		return err
+	}
+	if err := yaml.Unmarshal(data, cfg); err != nil {
+		return err
+	}
+	return nil
 }
