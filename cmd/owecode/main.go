@@ -166,12 +166,23 @@ func runHeadless(ctx context.Context, ag *agent.Agent, sess *session.Session, pr
 	if prompt == "" {
 		return fmt.Errorf("prompt required in no-tui mode")
 	}
-	// Drain events in background
+	// Forward events to stdout
 	go func() {
 		for ev := range ag.Events() {
-			if ev.Type == agent.EventToken {
+			switch ev.Type {
+			case agent.EventToken:
 				if tok, ok := ev.Payload.(string); ok {
 					fmt.Print(tok)
+				}
+			case agent.EventToolCall:
+				if tc, ok := ev.Payload.(aiPkg.ToolCall); ok {
+					fmt.Fprintf(os.Stderr, "\n[tool: %s]\n", tc.Name)
+				}
+			case agent.EventDone:
+				fmt.Println()
+			case agent.EventError:
+				if err, ok := ev.Payload.(error); ok {
+					fmt.Fprintf(os.Stderr, "\nError: %v\n", err)
 				}
 			}
 		}
@@ -189,9 +200,9 @@ func resolveProvider(cfg *config.Config) (aiPkg.Provider, error) {
 	}
 
 	switch cfg.Provider {
-	case "openai", "":
+	case "openai":
 		return openaiProvider.New(aiCfg), nil
-	case "anthropic":
+	case "anthropic", "":
 		return anthropicProvider.New(aiCfg), nil
 	case "google":
 		return googleProvider.New(aiCfg), nil

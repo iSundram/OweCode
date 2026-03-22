@@ -12,8 +12,8 @@ func Default() *Config {
 	skillsDir := filepath.Join(home, ".owecode", "skills")
 
 	return &Config{
-		Provider:    "openai",
-		Model:       "gpt-4o",
+		Provider:    "anthropic",
+		Model:       "claude-opus-4-5",
 		Mode:        "suggest",
 		Theme:       "catppuccin",
 		Keybindings: "default",
