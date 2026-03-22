@@ -358,7 +358,7 @@ type streamContentBlockDelta struct {
 
 type streamContentBlockStart struct {
 	Type         string                `json:"type"`
-	Index        int                   `index"`
+	Index        int                   `json:"index"`
 	ContentBlock anthropicContentBlock `json:"content_block"`
 }
 

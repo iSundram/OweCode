@@ -137,7 +137,7 @@ func (c *Client) TokenCount(messages []ai.Message) (int, error) {
 }
 
 func (c *Client) Complete(ctx context.Context, req ai.CompletionRequest) (ai.CompletionResponse, error) {
-	msgs := convertMessages(req)
+	msgs := ChatMessagesFromRequest(req)
 
 	// Handle reasoning models which might not support system messages in the same way
 	// or require specific parameters.
@@ -154,7 +154,7 @@ func (c *Client) Complete(ctx context.Context, req ai.CompletionRequest) (ai.Com
 		msgs = append([]gogpt.ChatCompletionMessage{sys}, msgs...)
 	}
 
-	tools := convertTools(req.Tools)
+	tools := ToolsFromSchemas(req.Tools)
 
 	gptReq := gogpt.ChatCompletionRequest{
 		Model:       c.model,
@@ -163,6 +163,9 @@ func (c *Client) Complete(ctx context.Context, req ai.CompletionRequest) (ai.Com
 		Temperature: float32(req.Temperature),
 		MaxTokens:   req.MaxTokens,
 		Stream:      req.Stream,
+	}
+	if req.Stream {
+		gptReq.StreamOptions = &gogpt.StreamOptions{IncludeUsage: true}
 	}
 
 	// Reasoning models often don't support temperature
@@ -203,61 +206,6 @@ func (c *Client) syncComplete(ctx context.Context, req gogpt.ChatCompletionReque
 		TotalTokens:  resp.Usage.TotalTokens,
 	}
 	return ai.NewStaticResponse(text, toolCalls, stop, usage), nil
-}
-
-func (c *Client) streamComplete(ctx context.Context, req gogpt.ChatCompletionRequest) (ai.CompletionResponse, error) {
-	stream, err := c.client.CreateChatCompletionStream(ctx, req)
-	if err != nil {
-		return nil, err
-	}
-	ch := make(chan ai.Chunk, 64)
-	go func() {
-		defer close(ch)
-		defer stream.Close()
-		for {
-			resp, err := stream.Recv()
-			if err != nil {
-				if err.Error() != "EOF" {
-					ch <- ai.Chunk{Error: err, Done: true}
-				} else {
-					ch <- ai.Chunk{Done: true}
-				}
-				return
-			}
-			if len(resp.Choices) == 0 {
-				continue
-			}
-			delta := resp.Choices[0].Delta
-			ch <- ai.Chunk{Text: delta.Content}
-		}
-	}()
-	return ai.NewChannelResponse(ch, ai.StopReasonEnd, ai.Usage{}), nil
-}
-
-func convertMessages(req ai.CompletionRequest) []gogpt.ChatCompletionMessage {
-	var msgs []gogpt.ChatCompletionMessage
-	for _, m := range req.Messages {
-		role := string(m.Role)
-		content := m.TextContent()
-		msgs = append(msgs, gogpt.ChatCompletionMessage{Role: role, Content: content})
-	}
-	return msgs
-}
-
-func convertTools(schemas []ai.ToolSchema) []gogpt.Tool {
-	if len(schemas) == 0 {
-		return nil
-	}
-	tools := make([]gogpt.Tool, 0, len(schemas))
-	for _, s := range schemas {
-		params, _ := json.Marshal(s.Parameters)
-		var def gogpt.FunctionDefinition
-		def.Name = s.Name
-		def.Description = s.Description
-		_ = json.Unmarshal(params, &def.Parameters)
-		tools = append(tools, gogpt.Tool{Type: gogpt.ToolTypeFunction, Function: &def})
-	}
-	return tools
 }
 
 func mapStopReason(r string) ai.StopReason {

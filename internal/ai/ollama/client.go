@@ -8,7 +8,10 @@ import (
 	"io"
 	"net/http"
 
+	gogpt "github.com/sashabaranov/go-openai"
+
 	"github.com/iSundram/OweCode/internal/ai"
+	openaiCompat "github.com/iSundram/OweCode/internal/ai/openai"
 )
 
 const defaultBaseURL = "http://localhost:11434"
@@ -74,39 +77,42 @@ func (c *Client) TokenCount(messages []ai.Message) (int, error) {
 	return ai.ApproximateTokenCount(messages), nil
 }
 
-type ollamaMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
-}
-
-type ollamaRequest struct {
-	Model    string          `json:"model"`
-	Messages []ollamaMessage `json:"messages"`
-	Stream   bool            `json:"stream"`
+type ollamaChatRequest struct {
+	Model    string                        `json:"model"`
+	Messages []gogpt.ChatCompletionMessage `json:"messages"`
+	Tools    []gogpt.Tool                  `json:"tools,omitempty"`
+	Stream   bool                          `json:"stream"`
 }
 
 type ollamaResponse struct {
 	Message struct {
-		Role    string `json:"role"`
-		Content string `json:"content"`
+		Role      string `json:"role"`
+		Content   string `json:"content"`
+		ToolCalls []struct {
+			ID       string `json:"id"`
+			Type     string `json:"type"`
+			Function struct {
+				Name      string `json:"name"`
+				Arguments string `json:"arguments"`
+			} `json:"function"`
+		} `json:"tool_calls,omitempty"`
 	} `json:"message"`
-	Done               bool `json:"done"`
-	PromptEvalCount    int  `json:"prompt_eval_count"`
-	EvalCount          int  `json:"eval_count"`
+	Done            bool `json:"done"`
+	PromptEvalCount int  `json:"prompt_eval_count"`
+	EvalCount       int  `json:"eval_count"`
 }
 
 func (c *Client) Complete(ctx context.Context, req ai.CompletionRequest) (ai.CompletionResponse, error) {
-	msgs := make([]ollamaMessage, 0, len(req.Messages)+1)
+	msgs := openaiCompat.ChatMessagesFromRequest(req)
 	if req.System != "" {
-		msgs = append(msgs, ollamaMessage{Role: "system", Content: req.System})
+		msgs = append([]gogpt.ChatCompletionMessage{{Role: "system", Content: req.System}}, msgs...)
 	}
-	for _, m := range req.Messages {
-		msgs = append(msgs, ollamaMessage{Role: string(m.Role), Content: m.TextContent()})
-	}
+	tools := openaiCompat.ToolsFromSchemas(req.Tools)
 
-	body, err := json.Marshal(ollamaRequest{
+	body, err := json.Marshal(ollamaChatRequest{
 		Model:    c.model,
 		Messages: msgs,
+		Tools:    tools,
 		Stream:   false,
 	})
 	if err != nil {
@@ -138,10 +144,31 @@ func (c *Client) Complete(ctx context.Context, req ai.CompletionRequest) (ai.Com
 		return nil, err
 	}
 
+	var toolCalls []ai.ToolCall
+	for _, tc := range or.Message.ToolCalls {
+		var args map[string]any
+		if tc.Function.Arguments != "" {
+			_ = json.Unmarshal([]byte(tc.Function.Arguments), &args)
+		}
+		if args == nil {
+			args = map[string]any{}
+		}
+		toolCalls = append(toolCalls, ai.ToolCall{
+			ID:   tc.ID,
+			Name: tc.Function.Name,
+			Args: args,
+		})
+	}
+
+	stop := ai.StopReasonEnd
+	if len(toolCalls) > 0 {
+		stop = ai.StopReasonTools
+	}
+
 	usage := ai.Usage{
 		InputTokens:  or.PromptEvalCount,
 		OutputTokens: or.EvalCount,
 		TotalTokens:  or.PromptEvalCount + or.EvalCount,
 	}
-	return ai.NewStaticResponse(or.Message.Content, nil, ai.StopReasonEnd, usage), nil
+	return ai.NewStaticResponse(or.Message.Content, toolCalls, stop, usage), nil
 }

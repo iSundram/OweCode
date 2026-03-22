@@ -14,7 +14,6 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
-	"gopkg.in/yaml.v3"
 
 	"github.com/iSundram/OweCode/internal/agent"
 	aiPkg "github.com/iSundram/OweCode/internal/ai"
@@ -29,7 +28,6 @@ import (
 	openrouterProvider "github.com/iSundram/OweCode/internal/ai/openrouter"
 	xaiProvider "github.com/iSundram/OweCode/internal/ai/xai"
 	"github.com/iSundram/OweCode/internal/config"
-	gitutil "github.com/iSundram/OweCode/internal/git"
 	"github.com/iSundram/OweCode/internal/session"
 	"github.com/iSundram/OweCode/internal/tools"
 	toolsFS "github.com/iSundram/OweCode/internal/tools/filesystem"
@@ -74,7 +72,7 @@ func init() {
 	f.StringVarP(&flags.Prompt, "prompt", "p", "", "Non-interactive: run this prompt and exit")
 	f.StringVar(&flags.Provider, "provider", "", "AI provider (openai, anthropic, google, ollama, openrouter, xai, deepseek, glm, minimax, kimi)")
 	f.StringVarP(&flags.Model, "model", "m", "", "Model name")
-	f.StringVar(&flags.Mode, "mode", "", "Approval mode: suggest, auto-edit, full-auto, plan")
+	f.StringVar(&flags.Mode, "mode", "", "Approval mode: edit, plan")
 	f.StringVar(&flags.Theme, "theme", "", "Color theme: catppuccin, dracula")
 	f.StringVar(&flags.Keybindings, "keybindings", "", "Key bindings: default, vim, emacs")
 	f.StringVarP(&flags.Output, "output", "o", "text", "Output format: text | json | stream-json")
@@ -105,14 +103,6 @@ func initConfig() {
 	} else {
 		home, _ := os.UserHomeDir()
 		viper.AddConfigPath(home + "/.owecode")
-		viper.AddConfigPath(".owecode")
-		viper.AddConfigPath(".")
-		if wd, err := os.Getwd(); err == nil {
-			if root, err := gitutil.RootDir(context.Background(), wd); err == nil {
-				viper.AddConfigPath(filepath.Join(root, ".owecode"))
-				viper.AddConfigPath(root)
-			}
-		}
 	}
 	viper.SetEnvPrefix("OWECODE")
 	viper.AutomaticEnv()
@@ -211,6 +201,7 @@ func run(cmd *cobra.Command, args []string) error {
 
 	// Build agent
 	ag := agent.New(cfg, provider, sess, reg)
+	ag.SetSessionPersist(func() { _ = storage.Save(sess) })
 
 	// Save session on exit
 	defer func() {
@@ -224,20 +215,15 @@ func run(cmd *cobra.Command, args []string) error {
 }
 
 func applyProjectDefaults(cfg *config.Config, cmd *cobra.Command) {
-	wd, err := os.Getwd()
+	if cmd.Flags().Changed("session-dir") {
+		return
+	}
+	home, err := os.UserHomeDir()
 	if err != nil {
 		return
 	}
-	root, err := gitutil.RootDir(context.Background(), wd)
-	if err != nil || root == "" {
-		return
-	}
-
-	// Prefer per-project session persistence unless explicitly overridden.
-	if !cmd.Flags().Changed("session-dir") {
-		cfg.SessionDir = filepath.Join(root, ".owecode", "sessions")
-	}
-	_ = os.MkdirAll(filepath.Join(root, ".owecode"), 0o700)
+	cfg.SessionDir = filepath.Join(home, ".owecode", "sessions")
+	_ = os.MkdirAll(filepath.Join(home, ".owecode"), 0o700)
 }
 
 func runHeadless(ctx context.Context, ag *agent.Agent, sess *session.Session, prompt string) error {
@@ -253,8 +239,18 @@ func runHeadless(ctx context.Context, ag *agent.Agent, sess *session.Session, pr
 					fmt.Print(tok)
 				}
 			case agent.EventToolCall:
-				if tc, ok := ev.Payload.(aiPkg.ToolCall); ok {
+				if te, ok := ev.Payload.(agent.ToolCallEvent); ok {
+					fmt.Fprintf(os.Stderr, "\n[tool:start] %s id=%s\n", te.Name, te.ID)
+				} else if tc, ok := ev.Payload.(aiPkg.ToolCall); ok {
 					fmt.Fprintf(os.Stderr, "\n[tool: %s]\n", tc.Name)
+				}
+			case agent.EventToolDone:
+				if td, ok := ev.Payload.(agent.ToolDoneEvent); ok {
+					state := "ok"
+					if td.Result.IsError {
+						state = "error"
+					}
+					fmt.Fprintf(os.Stderr, "\n[tool:%s] %s id=%s dur=%s\n", state, td.Name, td.ID, td.Duration.Round(time.Millisecond))
 				}
 			case agent.EventDone:
 				fmt.Println()
@@ -270,14 +266,6 @@ func runHeadless(ctx context.Context, ag *agent.Agent, sess *session.Session, pr
 
 func resolveProvider(cfg *config.Config) (aiPkg.Provider, error) {
 	pc := cfg.Providers[cfg.Provider]
-	if mc, ok := pc.Models[cfg.Model]; ok {
-		if mc.APIKey != "" {
-			pc.APIKey = mc.APIKey
-		}
-		if mc.BaseURL != "" {
-			pc.BaseURL = mc.BaseURL
-		}
-	}
 	aiCfg := aiPkg.ProviderConfig{
 		APIKey:       pc.APIKey,
 		BaseURL:      pc.BaseURL,
@@ -335,8 +323,9 @@ func resolveAPIKeysFromEnv(cfg *config.Config) {
 	}
 	for provider, envVar := range envMap {
 		if val := os.Getenv(envVar); val != "" {
-			pc := cfg.Providers[provider]
-			if pc.APIKey == "" {
+			pc, exists := cfg.Providers[provider]
+			// Only set from env if not already present in config (manual set)
+			if !exists || pc.APIKey == "" {
 				pc.APIKey = val
 				cfg.Providers[provider] = pc
 			}
@@ -345,26 +334,10 @@ func resolveAPIKeysFromEnv(cfg *config.Config) {
 }
 
 func decodeConfigFromViper(cfg *config.Config) error {
-	if !viper.IsSet("provider") &&
-		!viper.IsSet("model") &&
-		!viper.IsSet("providers") &&
-		!viper.IsSet("mode") &&
-		!viper.IsSet("sessionDir") {
-		return nil
-	}
-
-	raw := map[string]any{}
-	for _, k := range []string{"provider", "model", "mode", "sessionDir", "providers"} {
-		if viper.IsSet(k) {
-			raw[k] = viper.Get(k)
-		}
-	}
-	data, err := yaml.Marshal(raw)
-	if err != nil {
-		return err
-	}
-	if err := yaml.Unmarshal(data, cfg); err != nil {
-		return err
+	// Unmarshal directly into the config struct using viper's built-in support.
+	// This handles mapstructure tags correctly.
+	if err := viper.Unmarshal(cfg); err != nil {
+		return fmt.Errorf("viper unmarshal: %w", err)
 	}
 	return nil
 }

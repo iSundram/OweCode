@@ -14,7 +14,7 @@ func Default() *Config {
 	return &Config{
 		Provider:    "anthropic",
 		Model:       "claude-sonnet-4-6",
-		Mode:        "suggest",
+		Mode:        "edit",
 		Theme:       "catppuccin",
 		Keybindings: "default",
 		Layout:      "default",
