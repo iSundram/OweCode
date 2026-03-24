@@ -2,77 +2,55 @@
 
 > A best-in-class AI coding agent for the terminal, written in Go.
 
-OweCode is a powerful, open-source AI coding agent that runs entirely in your terminal. Built in Go for maximum performance and portability, it brings the best features from leading AI coding tools into a single, cohesive experience — with a rich TUI, multi-provider AI support, and deep code intelligence.
+OweCode is a powerful, open-source AI coding agent designed to live where developers spend their most productive hours: the terminal. Built for speed, portability, and deep system integration, OweCode transforms your CLI into a high-agency development environment that understands your code as deeply as you do.
 
 ---
 
-## Why OweCode?
+## Core Philosophy
 
-| Feature | OweCode | OpenAI Codex CLI | Gemini CLI | OpenCode |
-|---|---|---|---|---|
-| Language | **Go** | Rust / TypeScript | TypeScript | Go/TypeScript |
-| TUI | **Rich Bubble Tea TUI** | Basic | Basic | Good |
-| Multi-provider | ✅ | Limited | Google only | ✅ |
-| LSP Support | ✅ | ❌ | ❌ | ✅ |
-| Sandboxing | ✅ | ✅ | ✅ | ❌ |
-| MCP Support | ✅ | ❌ | ✅ | ✅ |
-| Offline/Local Models | ✅ | Via Ollama | ❌ | ✅ |
-| Single Binary | ✅ | ✅ | ❌ | ❌ |
-| Context Files | ✅ (OWECODE.md) | ✅ (AGENTS.md) | ✅ (GEMINI.md) | ✅ |
-| Session Checkpointing | ✅ | ❌ | ✅ | ✅ |
+OweCode is built on three foundational pillars that define its behavior and evolution:
+
+- **Terminal-Native Efficiency**: Developed in Go as a single static binary, OweCode offers zero-dependency installation and instant startup. It treats the terminal as a first-class citizen, leveraging high-performance TUI components for rich interaction without leaving your shell.
+- **Safety-First Agency**: We believe agents should be powerful but predictable. OweCode implements OS-native sandboxing, path-blocking for sensitive directories (like `.git`, `.ssh`), and mandatory Git-backed versioning for all code modifications. It doesn't just edit; it preserves your work's integrity.
+- **Deep Code Intelligence**: By integrating directly with Language Server Protocol (LSP) and Model Context Protocol (MCP), OweCode moves beyond simple text completion. It understands symbol relationships, diagnostics, and project-wide context, acting as a true "code-aware" partner.
 
 ---
 
 ## Quickstart
 
 ```bash
-# Install
+# Install (requires Go 1.22+)
 go install github.com/iSundram/OweCode/cmd/owecode@latest
 
-# Or via install script
-curl -fsSL https://owecode.dev/install | bash
-
-# Run interactively
+# Start an interactive session
 owecode
 
-# Run with a prompt
-owecode "explain this codebase to me"
-
-# Full auto mode
-owecode --mode full-auto "add unit tests for all Go files"
+# Ask a specific question or request a change
+owecode "explain the internal/agent package"
+owecode --mode edit "add unit tests for internal/tools/filesystem"
 ```
 
 ---
 
-## Key Features
+## Suggested Workflows
 
-- **🤖 Multi-Provider AI**: OpenAI GPT-5.4, Anthropic Claude 4.6, Google Gemini 3.x, xAI Grok 4.20, DeepSeek, GLM, MiniMax, Kimi, Ollama (local), and more
-- **🎨 Rich Terminal UI**: Built with [Bubble Tea](https://github.com/charmbracelet/bubbletea) + [Lip Gloss](https://github.com/charmbracelet/lipgloss) — syntax highlighting, diff views, progress indicators
-- **🔒 Sandboxed Execution**: OS-native sandboxing (macOS Seatbelt, Linux namespaces/Docker), network-off by default in full-auto
-- **📋 Three Approval Modes**: `suggest` (default), `auto-edit`, `full-auto`
-- **🔍 LSP Integration**: Real-time diagnostics, go-to-definition, hover docs while the agent works
-- **🔌 MCP Support**: Extend with any Model Context Protocol server
-- **💾 Session Checkpointing**: Save, resume, and branch conversations
-- **📁 Context Files (OWECODE.md)**: Per-project persistent instructions and memory
-- **⚡ Single Static Binary**: No Node.js, no runtime — just one Go binary
-- **🖥️ Headless/CI Mode**: Pipe-friendly, JSON output, scriptable
+Rather than listing features, we suggest several ways OweCode can become an indispensable part of your development loop:
+
+- **Context-Aware Refactoring**: Use OweCode to perform complex, multi-file refactors. Because it understands your project structure and leverages LSP, it can ensure that changes remain idiomatically consistent and syntactically correct.
+- **Automated Defensive Coding**: Suggest OweCode to analyze your existing functions and generate robust unit tests, especially for edge cases that are often overlooked.
+- **System-Level Debugging**: Leverage its sandboxed shell access to have the agent run tests, analyze logs, and identify the root cause of failures within a controlled environment.
+- **Rapid Prototyping**: Start with a high-level `plan` mode to scaffold new modules or features, then switch to `edit` mode to refine the implementation turn-by-turn.
 
 ---
 
-## Documentation
+## Vision & Future Directions
 
-| Document | Description |
-|---|---|
-| [Research](docs/RESEARCH.md) | Deep-dive feature research from OpenAI Codex, Gemini CLI, and OpenCode |
-| [Features](docs/FEATURES.md) | Best-in-class features selected for OweCode |
-| [Architecture](docs/ARCHITECTURE.md) | Go project structure and component design |
-| [TUI Design](docs/TUI.md) | Terminal UI layout, widgets, and interaction flows |
-| [Commands](docs/COMMANDS.md) | Full CLI commands and slash-command reference |
-| [Prompts](docs/PROMPTS.md) | Prompt engineering, context management, and system prompts |
-| [Configuration](docs/CONFIGURATION.md) | Configuration file format, env vars, and options |
-| [Security](docs/SECURITY.md) | Security model, sandboxing, and permission system |
-| [Bugs](docs/BUGS.md) | Common bugs to avoid and known solutions |
-| [Implementation](docs/IMPLEMENTATION.md) | Step-by-step Go implementation guide |
+We suggest OweCode is just the beginning of a new era of terminal-native agents. Our roadmap includes:
+
+- **Deeper LSP Synergy**: Moving from simple diagnostics to proactive refactoring suggestions based on real-time code analysis.
+- **Expanded MCP Ecosystem**: Building a library of specialized MCP servers for deeper integration with cloud providers, database engines, and CI/CD pipelines.
+- **Collaborative Agentic Loops**: Enabling multiple agents to collaborate on complex tasks, each specialized in different domains (e.g., security analysis vs. feature implementation).
+- **Offline-First Intelligence**: Enhancing support for local-first models (via Ollama and others) to ensure your code remains private and your agent remains fast even without an internet connection.
 
 ---
 
@@ -83,17 +61,17 @@ owecode/
 ├── cmd/
 │   └── owecode/          # CLI entry point
 ├── internal/
-│   ├── agent/            # Agent loop, tool dispatch
-│   ├── ai/               # AI provider clients (OpenAI, Gemini, Claude, Ollama...)
+│   ├── agent/            # Agent loop, tool dispatch (Edit/Plan modes)
+│   ├── ai/               # Multi-provider AI orchestration
 │   ├── lsp/              # LSP client integration
-│   ├── mcp/              # Model Context Protocol client
-│   ├── sandbox/          # OS sandboxing (macOS/Linux)
-│   ├── session/          # Session management, checkpointing
-│   ├── tools/            # Built-in tools (file, shell, search...)
-│   └── tui/              # Bubble Tea TUI components
-├── docs/                 # All documentation
-├── go.mod
-└── README.md
+│   ├── mcp/              # Model Context Protocol support
+│   ├── sandbox/          # OS-native security layers
+│   ├── session/          # Session persistence and checkpoints
+│   ├── tools/            # Atomic filesystem, shell, and git tools
+│   └── tui/              # Bubble Tea + Lip Gloss interface
+├── docs/                 # Detailed architectural and design documentation
+├── go.mod                # Go module definition
+└── README.md             # This document
 ```
 
 ---
