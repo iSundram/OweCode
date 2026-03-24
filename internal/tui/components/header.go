@@ -3,7 +3,7 @@ package components
 import (
 	"fmt"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 
 	"github.com/iSundram/OweCode/internal/tui/themes"
 )
@@ -59,10 +59,6 @@ func (h Header) View() string {
 	if h.width <= 0 {
 		return ""
 	}
-	providerStr := h.provider
-	if providerStr == "" {
-		providerStr = "openai"
-	}
 	modelStr := h.model
 	if modelStr == "" {
 		modelStr = "gpt-5.4"
@@ -73,7 +69,7 @@ func (h Header) View() string {
 	}
 
 	brand := h.styles.HeaderBrand.Render(" ◈ OweCode ")
-	modelInfo := h.styles.HeaderCenter.Render(fmt.Sprintf("[ %s/%s ]", providerStr, modelStr))
+	modelInfo := h.styles.HeaderCenter.Render(fmt.Sprintf("[ %s ]", modelStr))
 	modeInfo := h.styles.Header.Render(fmt.Sprintf("%s %s ", h.modeIcon(), modeStr))
 
 	tokenStyle := lipgloss.NewStyle().Foreground(h.styles.T.Muted)

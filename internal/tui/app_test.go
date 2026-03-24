@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/iSundram/OweCode/internal/agent"
 	"github.com/iSundram/OweCode/internal/ai"
 	anthropicProvider "github.com/iSundram/OweCode/internal/ai/anthropic"
