@@ -34,6 +34,7 @@ import (
 	"github.com/iSundram/OweCode/internal/tools"
 	"github.com/iSundram/OweCode/internal/tui/components"
 	"github.com/iSundram/OweCode/internal/tui/keys"
+	"github.com/iSundram/OweCode/internal/tui/render"
 	"github.com/iSundram/OweCode/internal/tui/themes"
 )
 
@@ -45,6 +46,7 @@ type App struct {
 	cfg            *config.Config
 	ag             *agent.Agent
 	sess           *session.Session
+	storage        *session.Storage
 	keys           *keys.Bindings
 	styles         *themes.Styles
 	theme          *themes.Theme
@@ -79,7 +81,7 @@ type App struct {
 	lastCtrlCAt        time.Time
 }
 
-func NewApp(cfg *config.Config, ag *agent.Agent, sess *session.Session, initialPrompt string) *App {
+func NewApp(cfg *config.Config, ag *agent.Agent, sess *session.Session, storage *session.Storage, initialPrompt string) *App {
 	theme := themes.Get(cfg.Theme)
 	styles := themes.NewStyles(theme)
 	kb := keys.Get(cfg.Keybindings)
@@ -89,6 +91,7 @@ func NewApp(cfg *config.Config, ag *agent.Agent, sess *session.Session, initialP
 		cfg:            cfg,
 		ag:             ag,
 		sess:           sess,
+		storage:        storage,
 		keys:           kb,
 		styles:         styles,
 		theme:          theme,
@@ -226,6 +229,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case components.SessionSelectedMsg:
 		if m.Session != nil {
 			a.sess = m.Session
+			a.ag.SetSession(m.Session)
 			a.conversation.Clear()
 			for _, sm := range m.Session.Messages {
 				a.conversation.AddMessage(string(sm.Role), sm.TextContent(), false)
@@ -233,7 +237,17 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.stats.InputTokens = m.Session.TotalInputTokens
 			a.stats.OutputTokens = m.Session.TotalOutputTokens
 			a.header.SetTokens(m.Session.TotalInputTokens + m.Session.TotalOutputTokens)
-			a.statusBar.SetStatus("Session loaded")
+			// Restore provider/model from session
+			if m.Session.Provider != "" {
+				model := m.Session.Model
+				if err := a.switchProvider(m.Session.Provider, model); err != nil {
+					a.statusBar.SetStatus(fmt.Sprintf("Session loaded (provider switch failed: %v)", err))
+				} else {
+					a.statusBar.SetStatus("Session loaded")
+				}
+			} else {
+				a.statusBar.SetStatus("Session loaded")
+			}
 		}
 	case modelsFetchedMsg:
 		a.availableModels = m
@@ -337,7 +351,16 @@ func (a *App) handleKey(m tea.KeyMsg) tea.Cmd {
 		a.layout()
 		return nil
 	case "ctrl+s":
-		a.sessionBrowser.SetSessions([]*session.Session{a.sess})
+		if a.storage != nil {
+			sessions, err := a.storage.List()
+			if err != nil {
+				a.statusBar.SetStatus(fmt.Sprintf("Error listing sessions: %v", err))
+				return nil
+			}
+			a.sessionBrowser.SetSessions(sessions)
+		} else {
+			a.sessionBrowser.SetSessions([]*session.Session{a.sess})
+		}
 		a.sessionBrowser.Show()
 		return nil
 	case "ctrl+r":
@@ -700,19 +723,27 @@ func (a *App) handleSlashCommand(input string) tea.Cmd {
 			return nil
 		}
 		a.conversation.AddMessage("system", fmt.Sprintf("Provider switched to %s", args[0]), false)
-		a.statusBar.SetStatus("Provider updated")
+		// Warn if API key is missing for the new provider
+		if pc, ok := a.cfg.Providers[args[0]]; !ok || pc.APIKey == "" {
+			a.conversation.AddMessage("system", fmt.Sprintf("Warning: No API key set for %s. Use /api-key <key> or set the appropriate environment variable.", args[0]), false)
+			a.statusBar.SetStatus("Provider updated (no API key)")
+		} else {
+			a.statusBar.SetStatus("Provider updated")
+		}
 		_ = a.persistProjectConfig()
 	case "/model":
-		if len(args) > 0 {
-			if err := a.switchProvider(a.cfg.Provider, args[0]); err != nil {
-				a.conversation.AddMessage("assistant", fmt.Sprintf("Error: %v", err), true)
-				a.statusBar.SetStatus("Error")
-				return nil
-			}
-			a.conversation.AddMessage("system", fmt.Sprintf("Model switched to %s", args[0]), false)
-			a.statusBar.SetStatus("Model updated")
-			_ = a.persistProjectConfig()
+		if len(args) == 0 {
+			a.conversation.AddMessage("system", fmt.Sprintf("Current model: %s (provider: %s)\nUsage: /model <model-name>", a.cfg.Model, a.cfg.Provider), false)
+			return nil
 		}
+		if err := a.switchProvider(a.cfg.Provider, args[0]); err != nil {
+			a.conversation.AddMessage("assistant", fmt.Sprintf("Error: %v", err), true)
+			a.statusBar.SetStatus("Error")
+			return nil
+		}
+		a.conversation.AddMessage("system", fmt.Sprintf("Model switched to %s", args[0]), false)
+		a.statusBar.SetStatus("Model updated")
+		_ = a.persistProjectConfig()
 	case "/mode":
 		if len(args) > 0 && agent.IsValid(args[0]) {
 			a.cfg.Mode = args[0]
@@ -791,7 +822,16 @@ func (a *App) handleSlashCommand(input string) tea.Cmd {
 		a.conversation.AddMessage("system", fmt.Sprintf("Base URL updated for %s", provider), false)
 		_ = a.persistProjectConfig()
 	case "/sessions":
-		a.sessionBrowser.SetSessions([]*session.Session{a.sess})
+		if a.storage != nil {
+			sessions, err := a.storage.List()
+			if err != nil {
+				a.statusBar.SetStatus(fmt.Sprintf("Error listing sessions: %v", err))
+				return nil
+			}
+			a.sessionBrowser.SetSessions(sessions)
+		} else {
+			a.sessionBrowser.SetSessions([]*session.Session{a.sess})
+		}
 		a.sessionBrowser.Show()
 	case "/diff":
 		a.diffPane.Toggle()
@@ -818,7 +858,17 @@ func (a *App) layout() {
 	if a.width <= 0 || a.height <= 0 {
 		return
 	}
-	headerH, statusH := 4, 1
+	// Set header width first so we can calculate its rendered height
+	a.header.SetWidth(a.width)
+	
+	// Calculate actual header height from rendered content
+	headerView := a.header.View()
+	headerH := strings.Count(headerView, "\n") + 1
+	if headerView == "" {
+		headerH = 0
+	}
+	
+	statusH := 1
 	inputH := a.input.LineCount() + 2
 	if inputH < 3 {
 		inputH = 3
@@ -826,7 +876,7 @@ func (a *App) layout() {
 
 	thinkingH := 0
 	if a.thinking && !a.confirm.Visible() {
-		thinkingH = 1
+		thinkingH = 2 // spinner line + preceding newline
 	}
 
 	mainH := a.height - headerH - statusH - inputH - thinkingH
@@ -834,7 +884,6 @@ func (a *App) layout() {
 		mainH = 1
 	}
 
-	a.header.SetWidth(a.width)
 	a.statusBar.SetWidth(a.width)
 	a.input.SetWidth(a.width)
 	a.palette.SetWidth(a.width / 2)
@@ -862,14 +911,17 @@ func (a *App) layout() {
 		}
 		a.conversation.SetSize(convW, mainH)
 		a.diffPane.SetSize(diffW, mainH)
+		render.SetWidth(convW - 10) // Update markdown word wrap width
 	} else {
 		if a.lspPanel.Visible() {
 			convW := mainW * 70 / 100
 			lspW := mainW - convW - 1
 			a.conversation.SetSize(convW, mainH)
 			a.lspPanel.SetSize(lspW, mainH)
+			render.SetWidth(convW - 10) // Update markdown word wrap width
 		} else {
 			a.conversation.SetSize(mainW, mainH)
+			render.SetWidth(mainW - 10) // Update markdown word wrap width
 		}
 	}
 	a.sessionBrowser.SetSize(a.width*3/4, a.height*3/4)
@@ -1001,8 +1053,8 @@ func isTransientStatus(s string) bool {
 	return strings.HasPrefix(n, "running ")
 }
 
-func Run(cfg *config.Config, ag *agent.Agent, sess *session.Session, initialPrompt string) error {
-	app := NewApp(cfg, ag, sess, initialPrompt)
+func Run(cfg *config.Config, ag *agent.Agent, sess *session.Session, storage *session.Storage, initialPrompt string) error {
+	app := NewApp(cfg, ag, sess, storage, initialPrompt)
 	p := tea.NewProgram(app, tea.WithAltScreen(), tea.WithMouseCellMotion())
 	_, err := p.Run()
 	return err
@@ -1114,9 +1166,7 @@ func (a *App) switchProvider(provider, model string) error {
 	}
 	a.ag.SetProvider(p)
 	a.header.SetProvider(a.cfg.Provider)
-	if a.cfg.Model != "" {
-		a.header.SetModel(a.cfg.Model)
-	}
+	a.header.SetModel(a.cfg.Model)
 	a.availableModels = nil
 	return nil
 }

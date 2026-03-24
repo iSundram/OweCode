@@ -28,7 +28,7 @@ func newTestApp(t *testing.T) *App {
 		APIKey:       cfg.Providers["anthropic"].APIKey,
 		DefaultModel: cfg.Model,
 	}), sess, reg)
-	app := NewApp(cfg, ag, sess, "")
+	app := NewApp(cfg, ag, sess, nil, "")
 	return app
 }
 
