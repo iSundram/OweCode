@@ -59,10 +59,12 @@ We suggest OweCode is just the beginning of a new era of terminal-native agents.
 ```
 owecode/
 ├── cmd/
-│   └── owecode/          # CLI entry point
+│   ├── owecode/          # CLI entry point
+│   └── installer/        # TUI installer
 ├── internal/
 │   ├── agent/            # Agent loop, tool dispatch (Edit/Plan modes)
 │   ├── ai/               # Multi-provider AI orchestration
+│   ├── installer/        # Installer logic and TUI
 │   ├── lsp/              # LSP client integration
 │   ├── mcp/              # Model Context Protocol support
 │   ├── sandbox/          # OS-native security layers

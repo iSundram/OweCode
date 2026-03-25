@@ -68,7 +68,7 @@ func (h Header) View() string {
 		modeStr = "edit"
 	}
 
-	brand := h.styles.HeaderBrand.Render(" ◈ OweCode ")
+	brand := h.styles.HeaderBrand.Render(" ⟡ OweCode ")
 	modelInfo := h.styles.HeaderCenter.Render(fmt.Sprintf("[ %s ]", modelStr))
 	modeInfo := h.styles.Header.Render(fmt.Sprintf("%s %s ", h.modeIcon(), modeStr))
 

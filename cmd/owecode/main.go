@@ -30,11 +30,15 @@ import (
 	"github.com/iSundram/OweCode/internal/config"
 	"github.com/iSundram/OweCode/internal/session"
 	"github.com/iSundram/OweCode/internal/tools"
+	toolsAgent "github.com/iSundram/OweCode/internal/tools/agent"
+	toolsDB "github.com/iSundram/OweCode/internal/tools/database"
 	toolsFS "github.com/iSundram/OweCode/internal/tools/filesystem"
 	toolsGit "github.com/iSundram/OweCode/internal/tools/git"
 	toolsInteraction "github.com/iSundram/OweCode/internal/tools/interaction"
 	toolsLSP "github.com/iSundram/OweCode/internal/tools/lsp"
+	toolsSecurity "github.com/iSundram/OweCode/internal/tools/security"
 	toolsShell "github.com/iSundram/OweCode/internal/tools/shell"
+	toolsTesting "github.com/iSundram/OweCode/internal/tools/testing"
 	toolsWeb "github.com/iSundram/OweCode/internal/tools/web"
 	"github.com/iSundram/OweCode/internal/tui"
 	"github.com/iSundram/OweCode/internal/version"
@@ -189,27 +193,63 @@ func run(cmd *cobra.Command, args []string) error {
 
 	// Build tool registry
 	reg := tools.NewRegistry()
+
+	// Filesystem tools
+	reg.Register(&toolsFS.ViewFileTool{})
 	reg.Register(&toolsFS.ReadFileTool{})
 	reg.Register(&toolsFS.WriteFileTool{})
 	reg.Register(&toolsFS.EditFileTool{})
+	reg.Register(&toolsFS.CreateFileTool{})
+	reg.Register(&toolsFS.DeleteFileTool{})
+	reg.Register(&toolsFS.MoveFileTool{})
+	reg.Register(&toolsFS.CopyFileTool{})
 	reg.Register(&toolsFS.ListDirectoryTool{})
+	reg.Register(&toolsFS.GlobTool{})
 	reg.Register(&toolsFS.GrepTool{})
-	reg.Register(toolsShell.NewRunnerTool(0))
+
+	// Shell tools (async-capable)
+	reg.Register(toolsShell.NewAsyncRunnerTool(0))
+	reg.Register(&toolsShell.ReadShellTool{})
+	reg.Register(&toolsShell.WriteShellTool{})
+	reg.Register(&toolsShell.StopShellTool{})
+	reg.Register(&toolsShell.ListShellsTool{})
+
+	// Git tools
 	reg.Register(&toolsGit.StatusTool{})
 	reg.Register(&toolsGit.DiffTool{})
 	reg.Register(&toolsGit.LogTool{})
+	reg.Register(&toolsGit.CommitTool{})
+	reg.Register(&toolsGit.AddTool{})
+	reg.Register(&toolsGit.CheckoutTool{})
+	reg.Register(&toolsGit.BranchTool{})
+	reg.Register(&toolsGit.StashTool{})
+	reg.Register(&toolsGit.BlameTool{})
+	reg.Register(&toolsGit.ShowTool{})
+
+	// Web tools
 	reg.Register(toolsWeb.NewFetchTool())
 	reg.Register(toolsWeb.NewSearchTool())
+
+	// LSP tools
 	reg.Register(&toolsLSP.DiagnosticsTool{})
-	reg.Register(toolsInteraction.NewAskUserTool(func(question string) (string, error) {
-		fmt.Fprintf(os.Stdout, "\n[ask_user] %s\n> ", question)
-		reader := bufio.NewReader(os.Stdin)
-		answer, err := reader.ReadString('\n')
-		if err != nil {
-			return "", err
-		}
-		return strings.TrimSpace(answer), nil
-	}))
+
+	// Testing tools
+	reg.Register(&toolsTesting.RunTestsTool{})
+	reg.Register(&toolsTesting.TestCoverageTool{})
+
+	// Security tools
+	reg.Register(&toolsSecurity.SecretsScanTool{})
+	reg.Register(&toolsSecurity.DependencyAuditTool{})
+
+	// Database tools
+	reg.Register(toolsDB.GetSQLTool())
+
+	// Agent/sub-agent tools
+	reg.Register(&toolsAgent.TaskTool{})
+	reg.Register(&toolsAgent.ReadAgentTool{})
+	reg.Register(&toolsAgent.ListAgentsTool{})
+
+	// Interaction tools
 	reg.Register(&toolsInteraction.NotifyTool{})
 
 	// Get AI provider
@@ -221,6 +261,32 @@ func run(cmd *cobra.Command, args []string) error {
 	// Build agent
 	ag := agent.New(cfg, provider, sess, reg)
 	ag.SetSessionPersist(func() { _ = storage.Save(sess) })
+
+	// Re-register ask_user with agent-aware responder for TUI
+	reg.Register(toolsInteraction.NewAskUserTool(func(question string) (string, error) {
+		if cfg.NoTUI {
+			fmt.Fprintf(os.Stdout, "\n[ask_user] %s\n> ", question)
+			reader := bufio.NewReader(os.Stdin)
+			answer, err := reader.ReadString('\n')
+			if err != nil {
+				return "", err
+			}
+			return strings.TrimSpace(answer), nil
+		}
+
+		// TUI mode: emit event and wait for response
+		ch := make(chan string, 1)
+		ag.Emit(agent.EventAskUser, map[string]any{
+			"question": question,
+			"reply":    ch,
+		})
+		select {
+		case res := <-ch:
+			return res, nil
+		case <-time.After(time.Hour): // Safety timeout
+			return "", fmt.Errorf("user response timeout")
+		}
+	}))
 
 	// Save session and config on exit
 	defer func() {
