@@ -20,7 +20,7 @@ builds:
       - amd64
       - arm64
     ldflags:
-      - -s -w -X github.com/iSundram/OweCode/internal/version.Version={{.Version}} -X github.com/iSundram/OweCode/internal/version.Commit={{.Commit}} -X github.com/iSundram/OweCode/internal/version.BuildDate={{.Date}}
+      - -s -w -X github.com/iSundram/OweCode/internal/version.Version={{ .Env.OWECODE_VERSION }} -X github.com/iSundram/OweCode/internal/version.Commit={{.Commit}} -X github.com/iSundram/OweCode/internal/version.BuildDate={{.Date}}
 
   - id: installer
     main: ./cmd/installer
@@ -35,7 +35,7 @@ builds:
       - amd64
       - arm64
     ldflags:
-      - -s -w -X github.com/iSundram/OweCode/internal/version.Version={{.Version}} -X github.com/iSundram/OweCode/internal/version.Commit={{.Commit}} -X github.com/iSundram/OweCode/internal/version.BuildDate={{.Date}}
+      - -s -w -X github.com/iSundram/OweCode/internal/installer.Version={{ .Env.INSTALLER_VERSION }} -X github.com/iSundram/OweCode/internal/installer.Commit={{.Commit}} -X github.com/iSundram/OweCode/internal/installer.BuildDate={{.Date}}
 
 archives:
   - id: owecode-archive
