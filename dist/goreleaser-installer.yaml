@@ -1,27 +1,12 @@
 version: 2
 
-project_name: owecode
+project_name: installer
 
 before:
   hooks:
     - go mod tidy
 
 builds:
-  - id: owecode
-    main: ./cmd/owecode
-    binary: owecode
-    env:
-      - CGO_ENABLED=0
-    goos:
-      - linux
-      - darwin
-      - windows
-    goarch:
-      - amd64
-      - arm64
-    ldflags:
-      - -s -w -X github.com/iSundram/OweCode/internal/version.Version={{ .Env.OWECODE_VERSION }} -X github.com/iSundram/OweCode/internal/version.Commit={{.Commit}} -X github.com/iSundram/OweCode/internal/version.BuildDate={{.Date}}
-
   - id: installer
     main: ./cmd/installer
     binary: installer
@@ -38,21 +23,6 @@ builds:
       - -s -w -X github.com/iSundram/OweCode/internal/installer.Version={{ .Env.INSTALLER_VERSION }} -X github.com/iSundram/OweCode/internal/installer.Commit={{.Commit}} -X github.com/iSundram/OweCode/internal/installer.BuildDate={{.Date}}
 
 archives:
-  - id: owecode-archive
-    builds:
-      - owecode
-    formats:
-      - tar.gz
-    format_overrides:
-      - goos: windows
-        formats:
-          - zip
-    name_template: "owecode_{{ .Tag }}_{{ .Os }}_{{ .Arch }}"
-    files:
-      - README.md
-      - LICENSE
-      - VERSION
-
   - id: installer-archive
     builds:
       - installer
@@ -62,13 +32,13 @@ archives:
       - goos: windows
         formats:
           - zip
-    name_template: "installer_{{ .Tag }}_{{ .Os }}_{{ .Arch }}"
+    name_template: "installer_{{ .Tag | replace \"installer/\" \"\" }}_{{ .Os }}_{{ .Arch }}"
     files:
       - LICENSE
-      - VERSION
+      - VERSION_INSTALLER
 
 checksum:
-  name_template: "checksums.txt"
+  name_template: "checksums_installer.txt"
 
 changelog:
   sort: asc
@@ -83,13 +53,13 @@ release:
   github:
     owner: iSundram
     name: OweCode
-  name_template: "v{{.Version}}"
+  name_template: "{{.Tag}}"
   draft: false
   prerelease: auto
   header: |
-    ## ⟡ OweCode Release v{{.Version}}
+    ## ✧ OweCode TUI Installer {{.Tag}}
     
-    To install OweCode, run:
+    To install OweCode using this installer, run:
     ```bash
     curl -sSL https://raw.githubusercontent.com/iSundram/OweCode/main/install.sh | sh
     ```

@@ -12,7 +12,7 @@ permissions:
   contents: write
 
 jobs:
-  goreleaser:
+  release:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -25,34 +25,51 @@ jobs:
         with:
           go-version: '1.22'
 
-      - name: Read versions
-        id: vars
+      - name: Determine what to release
+        id: check
         run: |
-          OWE_VER=$(cat VERSION)
-          INS_VER=$(cat VERSION_INSTALLER)
-          echo "OWECODE_VERSION=$OWE_VER" >> $GITHUB_ENV
-          echo "INSTALLER_VERSION=$INS_VER" >> $GITHUB_ENV
-          # Use the OweCode version as the Git Tag
-          echo "RELEASE_TAG=v$OWE_VER" >> $GITHUB_ENV
+          if git diff --name-only HEAD^ HEAD | grep -q "^VERSION$"; then
+            echo "agent_changed=true" >> $GITHUB_OUTPUT
+          fi
+          if git diff --name-only HEAD^ HEAD | grep -q "^VERSION_INSTALLER$"; then
+            echo "installer_changed=true" >> $GITHUB_OUTPUT
+          fi
 
-      - name: Create Tag
+      - name: Setup Git
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          if ! git rev-parse ${{ env.RELEASE_TAG }} >/dev/null 2>&1; then
-            git tag ${{ env.RELEASE_TAG }}
-            git push origin ${{ env.RELEASE_TAG }}
-          else
-            echo "Tag ${{ env.RELEASE_TAG }} already exists, skipping tag creation."
-          fi
 
-      - name: Run GoReleaser
-        uses: goreleaser/goreleaser-action@v6
-        with:
-          distribution: goreleaser
-          version: latest
-          args: release --clean
+      - name: Release OweCode Agent
+        if: steps.check.outputs.agent_changed == 'true'
+        run: |
+          VER=$(cat VERSION)
+          TAG="v$VER"
+          if ! git rev-parse "$TAG" >/dev/null 2>&1; then
+            git tag "$TAG"
+            git push origin "$TAG"
+            
+            OWECODE_VERSION=$VER \
+            goreleaser release --clean -f dist/goreleaser-owecode.yaml
+          else
+            echo "Tag $TAG already exists, skipping agent release."
+          fi
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          OWECODE_VERSION: ${{ env.OWECODE_VERSION }}
-          INSTALLER_VERSION: ${{ env.INSTALLER_VERSION }}
+
+      - name: Release OweCode TUI Installer
+        if: steps.check.outputs.installer_changed == 'true'
+        run: |
+          VER=$(cat VERSION_INSTALLER)
+          TAG="installer/v$VER"
+          if ! git rev-parse "$TAG" >/dev/null 2>&1; then
+            git tag "$TAG"
+            git push origin "$TAG"
+            
+            INSTALLER_VERSION=$VER \
+            goreleaser release --clean -f dist/goreleaser-installer.yaml
+          else
+            echo "Tag $TAG already exists, skipping installer release."
+          fi
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
