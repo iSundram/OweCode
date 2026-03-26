@@ -137,12 +137,18 @@ type anthropicMessage struct {
 }
 
 type anthropicRequest struct {
-	Model     string             `json:"model"`
-	MaxTokens int                `json:"max_tokens"`
-	System    string             `json:"system,omitempty"`
-	Messages  []anthropicMessage `json:"messages"`
-	Tools     []anthropicTool    `json:"tools,omitempty"`
-	Stream    bool               `json:"stream,omitempty"`
+	Model     string                 `json:"model"`
+	MaxTokens int                    `json:"max_tokens"`
+	System    string                 `json:"system,omitempty"`
+	Messages  []anthropicMessage     `json:"messages"`
+	Tools     []anthropicTool        `json:"tools,omitempty"`
+	Stream    bool                   `json:"stream,omitempty"`
+	Thinking  *anthropicThinkingConf `json:"thinking,omitempty"`
+}
+
+type anthropicThinkingConf struct {
+	Type         string `json:"type"`
+	BudgetTokens int    `json:"budget_tokens,omitempty"`
 }
 
 type anthropicResponse struct {
@@ -231,6 +237,18 @@ func (c *Client) Complete(ctx context.Context, req ai.CompletionRequest) (ai.Com
 		Messages:  msgs,
 		Tools:     tools,
 		Stream:    req.Stream,
+	}
+
+	// Add thinking support if configured
+	if req.Thinking != nil && req.Thinking.Type == "enabled" {
+		budgetTokens := req.Thinking.BudgetTokens
+		if budgetTokens == 0 {
+			budgetTokens = 10000 // Default thinking budget
+		}
+		areqBody.Thinking = &anthropicThinkingConf{
+			Type:         "enabled",
+			BudgetTokens: budgetTokens,
+		}
 	}
 
 	body, err := json.Marshal(areqBody)
@@ -390,11 +408,12 @@ type toolUseBlock struct {
 
 // streamState holds mutable state for SSE stream parsing.
 type streamState struct {
-	ch         chan<- ai.Chunk
-	toolBlocks map[int]*toolUseBlock
-	toolCalls  *[]ai.ToolCall
-	stopReason *ai.StopReason
-	usage      *ai.Usage
+	ch              chan<- ai.Chunk
+	toolBlocks      map[int]*toolUseBlock
+	thinkingBlocks  map[int]bool // Track which block indices are thinking content
+	toolCalls       *[]ai.ToolCall
+	stopReason      *ai.StopReason
+	usage           *ai.Usage
 }
 
 // parseStream reads SSE from the response body and returns a streaming response.
@@ -405,11 +424,12 @@ func (c *Client) parseStream(body io.ReadCloser) ai.CompletionResponse {
 	usage := ai.Usage{}
 
 	state := &streamState{
-		ch:         ch,
-		toolBlocks: map[int]*toolUseBlock{},
-		toolCalls:  &toolCalls,
-		stopReason: &stopReason,
-		usage:      &usage,
+		ch:             ch,
+		toolBlocks:     map[int]*toolUseBlock{},
+		thinkingBlocks: map[int]bool{},
+		toolCalls:      &toolCalls,
+		stopReason:     &stopReason,
+		usage:          &usage,
 	}
 
 	go func() {
@@ -473,6 +493,9 @@ func processSSEEvent(eventType, data string, state *streamState) {
 					id:   ev.ContentBlock.ID,
 					name: ev.ContentBlock.Name,
 				}
+			} else if ev.ContentBlock.Type == "thinking" {
+				// Mark this index as thinking content
+				state.thinkingBlocks[ev.Index] = true
 			}
 		}
 	case "content_block_delta":
@@ -481,7 +504,12 @@ func processSSEEvent(eventType, data string, state *streamState) {
 			switch ev.Delta.Type {
 			case "text_delta":
 				if ev.Delta.Text != "" {
-					state.ch <- ai.Chunk{Text: ev.Delta.Text}
+					// Check if this is thinking content
+					if state.thinkingBlocks[ev.Index] {
+						state.ch <- ai.Chunk{Thought: ev.Delta.Text}
+					} else {
+						state.ch <- ai.Chunk{Text: ev.Delta.Text}
+					}
 				}
 			case "input_json_delta":
 				if tb, ok := state.toolBlocks[ev.Index]; ok {

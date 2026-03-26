@@ -1,0 +1,95 @@
+version: 2
+
+project_name: owecode
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: owecode
+    main: ./cmd/owecode
+    binary: owecode
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w -X github.com/iSundram/OweCode/internal/version.Version={{.Version}} -X github.com/iSundram/OweCode/internal/version.Commit={{.Commit}} -X github.com/iSundram/OweCode/internal/version.BuildDate={{.Date}}
+
+  - id: installer
+    main: ./cmd/installer
+    binary: installer
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w -X github.com/iSundram/OweCode/internal/version.Version={{.Version}} -X github.com/iSundram/OweCode/internal/version.Commit={{.Commit}} -X github.com/iSundram/OweCode/internal/version.BuildDate={{.Date}}
+
+archives:
+  - id: owecode-archive
+    builds:
+      - owecode
+    formats:
+      - tar.gz
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+    name_template: "owecode_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - README.md
+      - LICENSE
+      - VERSION
+
+  - id: installer-archive
+    builds:
+      - installer
+    formats:
+      - tar.gz
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+    name_template: "installer_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - LICENSE
+      - VERSION
+
+checksum:
+  name_template: "checksums.txt"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^ci:"
+      - "merge"
+
+release:
+  github:
+    owner: iSundram
+    name: OweCode
+  name_template: "v{{.Version}}"
+  draft: false
+  prerelease: auto
+  header: |
+    ## ⟡ OweCode Release v{{.Version}}
+    
+    To install OweCode, run:
+    ```bash
+    curl -sSL https://raw.githubusercontent.com/iSundram/OweCode/main/install.sh | sh
+    ```
