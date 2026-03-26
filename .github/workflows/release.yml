@@ -1,0 +1,58 @@
+name: release
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'VERSION'
+      - 'VERSION_INSTALLER'
+
+permissions:
+  contents: write
+
+jobs:
+  goreleaser:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+
+      - name: Read versions
+        id: vars
+        run: |
+          OWE_VER=$(cat VERSION)
+          INS_VER=$(cat VERSION_INSTALLER)
+          echo "OWECODE_VERSION=$OWE_VER" >> $GITHUB_ENV
+          echo "INSTALLER_VERSION=$INS_VER" >> $GITHUB_ENV
+          # Use the OweCode version as the Git Tag
+          echo "RELEASE_TAG=v$OWE_VER" >> $GITHUB_ENV
+
+      - name: Create Tag
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          if ! git rev-parse ${{ env.RELEASE_TAG }} >/dev/null 2>&1; then
+            git tag ${{ env.RELEASE_TAG }}
+            git push origin ${{ env.RELEASE_TAG }}
+          else
+            echo "Tag ${{ env.RELEASE_TAG }} already exists, skipping tag creation."
+          fi
+
+      - name: Run GoReleaser
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: latest
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OWECODE_VERSION: ${{ env.OWECODE_VERSION }}
+          INSTALLER_VERSION: ${{ env.INSTALLER_VERSION }}
