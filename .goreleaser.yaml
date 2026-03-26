@@ -47,7 +47,7 @@ archives:
       - goos: windows
         formats:
           - zip
-    name_template: "owecode_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    name_template: "owecode_{{ .Tag }}_{{ .Os }}_{{ .Arch }}"
     files:
       - README.md
       - LICENSE
@@ -62,7 +62,7 @@ archives:
       - goos: windows
         formats:
           - zip
-    name_template: "installer_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    name_template: "installer_{{ .Tag }}_{{ .Os }}_{{ .Arch }}"
     files:
       - LICENSE
       - VERSION
